@@ -1,4 +1,6 @@
-use std::{io::ErrorKind, net::SocketAddr};
+use std::{io::ErrorKind, net::{SocketAddr, UdpSocket}, thread};
+
+use super::utils::{pipe_udp_to_server, pipe_udp_to_client};
 
 #[derive(PartialEq)]
 pub enum Method {
@@ -95,5 +97,27 @@ impl From<&SocketAddr> for ATYP {
       } else {
         Self::IPv4
       }
+  }
+}
+
+struct UdpTunnel {
+  src_socket: UdpSocket,
+  dst_socket: UdpSocket,
+}
+
+impl UdpTunnel {
+  fn build(src_addr: SocketAddr, dst_addr: SocketAddr) -> Self {
+    Self {
+      src_socket: UdpSocket::bind(addr)
+    }
+  }
+
+  fn exchange(&self) {
+    thread::spawn(|| {
+      pipe_udp_to_server(&self.src_socket, &self.dst_socket);
+    });
+    thread::spawn(|| {
+      pipe_udp_to_client(&self.src_socket, &self.dst_socket);
+    });
   }
 }

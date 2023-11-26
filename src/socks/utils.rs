@@ -41,7 +41,7 @@ pub fn parse_target(atyp: ATYP, message: &[u8]) -> (String, usize) {
   return (format!("{addr}:{port}"), port_pos + 2);
 }
 
-pub fn pipe_udp_to_server(current: &mut UdpSocket, next: &mut UdpSocket) {
+pub fn pipe_udp_to_server(current: &UdpSocket, next: &UdpSocket) {
   loop {
     let mut buf = [0; 10240];
     match current.recv_from(&mut buf) {
@@ -50,9 +50,6 @@ pub fn pipe_udp_to_server(current: &mut UdpSocket, next: &mut UdpSocket) {
         let (target, next_pos) = parse_target(atyp, &buf[4..size]);
 
         println!("[to server] target: {target}, size: {size}, data: {:?},", &buf[..size]);
-        if let Err(_) = current.peer_addr() {
-          let _ = current.connect(addr);
-        }
 
         next.send_to(&buf[next_pos..size], target).expect("send udp failed");
       },
@@ -64,7 +61,7 @@ pub fn pipe_udp_to_server(current: &mut UdpSocket, next: &mut UdpSocket) {
   }
 }
 
-pub fn pipe_udp_to_client(current: &mut UdpSocket, next: &mut UdpSocket) {
+pub fn pipe_udp_to_client(current: &UdpSocket, next: &UdpSocket) {
   loop {
     let mut buf = [0; 10240];
     match current.recv(&mut buf) {

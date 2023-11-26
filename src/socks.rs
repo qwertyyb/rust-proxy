@@ -94,10 +94,10 @@ fn handle_UDP(mut client: TcpStream, mut udp_socket: UdpSocket, target: &String,
 
   println!("received: target: {target}, client_addr: {client_addr}, size: {size}, raw: {:?}, data_pos: {}, data: {:?},", &buf[..size], next_pos + 4, &buf[next_pos..size]);
 
-  let mut server_socket = UdpSocket::bind("localhost:9990").unwrap();
-  server_socket.connect(&target).expect("connect remote failed: {target}");
-  server_socket.send(&buf[next_pos..size]).expect("send udp failed");
-  udp_socket.connect(client_addr).expect("connect client failed");
+  let mut server_socket = udp_socket.try_clone().unwrap();
+  // server_socket.connect(&target).expect("connect remote failed: {target}");
+  server_socket.send_to(&buf[next_pos..size], target).expect("send udp failed");
+  // udp_socket.connect(client_addr).expect("connect client failed");
 
   let mut client = udp_socket.try_clone().unwrap();
   let mut server = server_socket.try_clone().unwrap();
