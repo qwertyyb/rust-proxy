@@ -1,6 +1,12 @@
-use std::{net::{TcpListener, TcpStream, UdpSocket}, io::{prelude::*, Write}, thread, sync::{Arc}};
+use std::{
+    io::{prelude::*, Write},
+    net::{TcpListener, TcpStream},
+    sync::Arc,
+    thread,
+};
 
-use rust_proxy::{ThreadPool, socks, utils};
+use log::debug;
+use rust_proxy::{socks, utils, ThreadPool};
 
 fn is_connect(info: &String) -> bool {
     let lines: Vec<_> = info.split("\r\n").collect();
@@ -19,21 +25,19 @@ fn parse_target_server(info: &String) -> String {
     return String::new();
 }
 
-fn handle_connection(mut client: TcpStream, udp_socket: UdpSocket, addr: Arc<&str>) {
+fn handle_connection(mut client: TcpStream, addr: Arc<&str>) {
     let mut buf = [0; 8192];
     let size = client.read(&mut buf).unwrap();
     let str = String::from_utf8_lossy(&buf).to_string();
     let mut server;
 
-    // println!("client info: {str}, {size}");
-
     let target = parse_target_server(&str);
 
-    println!("target server: {target}, size: {size}, {:?}", &buf[..size]);
+    debug!("target server: {target}, size: {size}, {:?}", &buf[..size]);
 
     if target.is_empty() {
         // 解析目标服务器出错，尝试作为socks代理处理
-        socks::handle(&buf[..size], client, udp_socket, addr);
+        socks::handle(&buf[..size], client, addr);
         return;
     }
 
@@ -61,23 +65,24 @@ fn handle_connection(mut client: TcpStream, udp_socket: UdpSocket, addr: Arc<&st
 }
 
 fn main() {
+    // 注意，env_logger 必须尽可能早的初始化
+    env_logger::init();
     let addr = Arc::new("127.0.0.1:7878");
-    let server = TcpListener::bind(addr.as_ref())
-        .expect("launch server failed");
-    let udp_socket = UdpSocket::bind(addr.as_ref())
-        .expect("init udp server failed");
+    let server = TcpListener::bind(addr.as_ref()).expect("launch server failed");
     let pool: ThreadPool = ThreadPool::with_capacity(4);
     for connection in server.incoming() {
         if let Ok(connection) = connection {
-            println!("new connection received: {}", connection.peer_addr().unwrap());
-            
+            debug!(
+                "new connection received: {}",
+                connection.peer_addr().unwrap()
+            );
+
             let addr = Arc::clone(&addr);
-            let udp_socket = udp_socket.try_clone().unwrap();
             pool.run(|| {
-                handle_connection(connection, udp_socket, addr);
+                handle_connection(connection, addr);
             });
         }
     }
 
-    println!("shutdown server");
+    debug!("shutdown server");
 }
