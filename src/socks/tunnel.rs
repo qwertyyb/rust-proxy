@@ -11,9 +11,9 @@ use tokio::{
 
 use crate::socks::{constant::ATYP, utils};
 
-pub static NAT: OnceLock<Mutex<Nat>> = OnceLock::new();
+static NAT: OnceLock<Mutex<Nat>> = OnceLock::new();
 
-pub struct Nat {
+struct Nat {
     map: HashMap<u16, u16>,
 }
 impl Nat {
@@ -40,6 +40,9 @@ impl Nat {
     }
     fn insert(&mut self, local_port: u16, remote_port: u16) {
         self.map.insert(local_port, remote_port);
+    }
+    fn remove(&mut self, k: &u16) {
+        self.map.remove(k);
     }
 }
 
@@ -87,15 +90,15 @@ impl UdpTunnel {
             .await
             .expect("connect udp remote server failed");
 
-        // 监听数据开始交换
-
+        // 开始交换 udp 数据
+        // 把远程 server 的数据转交给本地 client
         let remote_client = Arc::clone(&self.local_socket);
         let remote_server = Arc::clone(&self.remote_socket);
         self.server_to_client = Some(task::spawn(async {
-            debug!("pipe to server");
             utils::pipe_udp_to_client(remote_server, remote_client).await;
         }));
 
+        // 把本地 client 的数据转交给远程 server
         let local_client = Arc::clone(&self.local_socket);
         let local_server = Arc::clone(&self.remote_socket);
         self.client_to_server = Some(task::spawn(async {
@@ -107,7 +110,7 @@ impl UdpTunnel {
             .await
             .expect("send udp data to server failed");
 
-        // 3. 添加到 hashmap 映射一下
+        // 添加到 NAT 映射
         nat.lock().unwrap().insert(
             self.local_socket.local_addr().unwrap().port(),
             self.remote_socket.local_addr().unwrap().port(),
@@ -124,7 +127,13 @@ impl Drop for UdpTunnel {
             join.abort();
         }
 
-        println!(
+        // 移除 NAT 映射
+        let nat = Nat::global().lock();
+        if let Ok(mut nat) = nat {
+            nat.remove(&self.local_socket.local_addr().unwrap().port());
+        }
+
+        debug!(
             "local port count: {}, remote port count: {}",
             Arc::strong_count(&self.local_socket),
             Arc::strong_count(&self.local_socket)

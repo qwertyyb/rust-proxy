@@ -1,3 +1,4 @@
+mod auth;
 mod constant;
 mod tunnel;
 mod utils;
@@ -9,16 +10,14 @@ use tokio::net::TcpStream;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::config::Config;
+use crate::socks::auth::Auth;
+use crate::Config;
 use crate::{
     socks::constant::{ATYP, REP},
     utils as root_utils,
 };
 
-use self::{
-    constant::{Method, CMD},
-    tunnel::UdpTunnel,
-};
+use self::{constant::CMD, tunnel::UdpTunnel};
 
 pub fn is_socks5_proxy(message: &[u8]) -> bool {
     let [ver, nmethods, ..] = *message else {
@@ -28,6 +27,17 @@ pub fn is_socks5_proxy(message: &[u8]) -> bool {
         return true;
     }
     return false;
+}
+
+pub fn format_socks5_info(config: &Config) -> String {
+    let mut socks5_info = String::from("socks5://");
+    if let (Some(username), Some(password)) =
+        (config.username.as_deref(), config.password.as_deref())
+    {
+        socks5_info.push_str(&format!("{username}:{password}@"));
+    }
+    socks5_info.push_str(&format!("{}:{}", config.host, config.port));
+    socks5_info
 }
 
 fn parse_cmd(message: &[u8]) -> CMD {
@@ -90,65 +100,19 @@ async fn handle_udp(mut client: TcpStream) {
     }
 }
 
-async fn handle_auth(client: &mut TcpStream) -> bool {
-    let mut buf = [0; 513];
-    let _ = client.read(&mut buf).await;
-    if buf[0] != 0x01 {
-        panic!("auth failed, ver: {}", buf[0]);
-    }
-    let ulen = buf[1] as usize;
-    let uname = String::from_utf8_lossy(&buf[2..(2 + ulen)]).to_string();
-    let plen = buf[2 + ulen] as usize;
-    let pass = String::from_utf8_lossy(&buf[(2 + ulen + 1)..(2 + ulen + 1 + plen)]).to_string();
-    debug!("auth, username: {uname:?}, password: {pass:?}");
-
-    let config = Config::global();
-    if uname == *config.username.as_ref().unwrap() && pass == *config.password.as_ref().unwrap() {
-        debug!("auth successfully");
-        client.write_all(&[0x01, 0x00]).await.unwrap();
-        return true;
-    }
-    debug!("auth failed");
-    client.write_all(&[0x01, 0x01]).await.unwrap();
-    client.shutdown().await.unwrap();
-    return false;
-}
-
-pub async fn handle(message: &[u8], mut client: TcpStream) {
+pub async fn handle(mut client: TcpStream) {
     //     +----+----------+----------+
     //     |VER | NMETHODS | METHODS  |
     //     +----+----------+----------+
     //     | 1  |    1     | 1 to 255 |
     //     +----+----------+----------+
 
-    let [_, nmethods, ..] = *message else {
-        return;
-    };
-    let mut methods = message[2..2 + (nmethods as usize)]
-        .into_iter()
-        .map(|value| Method::from(*value));
-
-    if Config::global().need_auth() {
-        info!("proxy server need username/password auth");
-        if methods.any(|value| value == Method::UserPwd) {
-            debug!("client support username/password auth, start auth");
-            client
-                .write_all(&[0x05, Method::UserPwd as u8])
-                .await
-                .unwrap();
-            if !handle_auth(&mut client).await {
-                return;
-            }
-        } else {
-            client.write_all(&[0x05, 0xff]).await.unwrap();
-            return;
-        }
-    } else if !Config::global().need_auth() && methods.any(|value| value == Method::None) {
-        info!("proxy server dont need username/password auth");
-        async { client.write_all(&[0x05, Method::None as u8]).await }
-            .await
-            .unwrap();
-    } else {
+    let mut buf = [0; 257];
+    let size = client.read(&mut buf).await.unwrap();
+    let message = &buf[..size];
+    info!("receive first from client, size: {size}, message: {message:?}");
+    let success = Auth::global().handle(message, &mut client).await.unwrap();
+    if !success {
         return;
     }
 

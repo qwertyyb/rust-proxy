@@ -1,78 +1,46 @@
-pub mod config;
+mod config;
 pub mod http;
 pub mod socks;
 pub mod utils;
 
-use std::{
-    sync::{
-        mpsc::{self, Receiver, Sender},
-        Arc, Mutex,
-    },
-    thread::{self, JoinHandle},
-};
+pub use config::Config;
+use log::{debug, info};
+use tokio::net::{TcpListener, TcpStream};
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
+async fn handle_client(client: TcpStream) {
+    let mut buf = [0; 8192];
+    let size = client.peek(&mut buf).await.unwrap();
+    let messsage = &buf[..size];
 
-struct Worker {
-    thread: Option<JoinHandle<()>>,
-}
+    debug!("receive first buffer, size: {size}, {:?}", &buf[..size]);
 
-impl Worker {
-    fn new(receiver: Arc<Mutex<Receiver<Job>>>) -> Self {
-        Worker {
-            thread: Some(thread::spawn(move || loop {
-                let job = receiver.lock().unwrap().recv();
-                if let Ok(job) = job {
-                    job();
-                } else {
-                    break;
-                };
-            })),
-        }
+    if socks::is_socks5_proxy(messsage) {
+        debug!("use as socks5 proxy");
+        socks::handle(client).await;
+    } else {
+        debug!("use as http proxy");
+        http::handle(client).await;
     }
 }
 
-impl Drop for Worker {
-    fn drop(&mut self) {
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
+pub async fn launch() {
+    let config = Config::global();
+    info!("config: {config:#?}");
+    let addr = format!("{}:{}", config.host, config.port);
+    let server = TcpListener::bind(&addr)
+        .await
+        .expect("launch proxy server failed");
 
-pub struct ThreadPool {
-    workers: Vec<Worker>,
-    sender: Option<Sender<Job>>,
-}
+    println!("proxy server is running at: {addr}");
+    println!("proxy address:");
+    println!("\t\thttp://{addr}");
+    println!("\t\t{}", socks::format_socks5_info(&config));
 
-impl ThreadPool {
-    pub fn with_capacity(size: usize) -> Self {
-        let (sender, receiver) = mpsc::channel();
-
-        let receiver = Arc::new(Mutex::new(receiver));
-        let mut workers = Vec::new();
-        for _i in 0..size {
-            workers.push(Worker::new(Arc::clone(&receiver)));
-        }
-
-        Self {
-            sender: Some(sender),
-            workers,
-        }
-    }
-
-    pub fn run<F>(&self, f: F)
-    where
-        F: FnOnce() + Send + 'static,
-    {
-        let job = Box::new(f);
-        let _ = self.sender.as_ref().unwrap().send(job);
-    }
-}
-
-impl Drop for ThreadPool {
-    fn drop(&mut self) {
-        self.sender.take();
-        self.workers.clear();
+    loop {
+        let (client, _) = server.accept().await.unwrap();
+        debug!("new client connected");
+        tokio::spawn(async move {
+            handle_client(client).await;
+        });
     }
 }

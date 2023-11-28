@@ -27,7 +27,7 @@ impl Config {
         CONFIG.get_or_init(|| Self::parse())
     }
 
-    pub fn need_auth(&self) -> bool {
+    pub fn has_auth(&self) -> bool {
         return self.username.is_some() && self.password.is_some();
     }
 }

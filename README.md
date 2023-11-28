@@ -14,9 +14,16 @@
 
 ## 开发
 
-开发测试方式
+### 启动开发
 
-### 1. TCP 测试
+```bash
+# 启动debug
+RUST_LOG=debug cargo run
+```
+
+### 开发测试
+
+#### 1. TCP 测试
 
 TCP 相对来说比较容易测试，使用curl即可
 
@@ -29,7 +36,7 @@ curl https://www.baidu.com -x socks5://127.0.0.1:7878 -v
 curl https://www.baidu.com -x socks5://hello:world@127.0.0.1:7878 -v
 ```
 
-### 2. UDP 测试
+#### 2. UDP 测试
 
 UDP测试就比较难了，推荐安装 brook 进行 UDP 的开发测试
 
@@ -40,6 +47,6 @@ brew install brook
 brook --log console dnsserver --listen 127.0.0.1:5354 --dns "192.168.31.1:53"
 
 # 通过socks代理发起dns查询
-brook testsocks5 --socks5 127.0.0.1:7878 --domain "baidu.com" --dns "127.0.0.1:5354" -a 39.156.66.10
+brook testsocks5 --socks5 127.0.0.1:7878
 
 ```

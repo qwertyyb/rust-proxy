@@ -1,5 +1,8 @@
 use log::debug;
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 
 use crate::utils;
 
@@ -20,7 +23,10 @@ fn is_tcp(info: &String) -> bool {
     first[0] == "CONNECT"
 }
 
-pub async fn handle(message: &[u8], mut client: TcpStream) {
+pub async fn handle(mut client: TcpStream) {
+    let mut buf = [0; 10240];
+    let size = client.read(&mut buf).await.unwrap();
+    let message = &buf[..size];
     let str = String::from_utf8_lossy(message).to_string();
     let target = parse_target_server(&str);
     let mut server;
