@@ -1,88 +1,61 @@
-use std::{
-    io::{prelude::*, Write},
-    net::{TcpListener, TcpStream},
-    sync::Arc,
-    thread,
-};
+use std::env;
+use std::error::Error;
 
 use log::debug;
-use rust_proxy::{socks, utils, ThreadPool};
+use rust_proxy::config::Config;
+use rust_proxy::socks::is_socks5_proxy;
+use rust_proxy::{http, socks};
 
-fn is_connect(info: &String) -> bool {
-    let lines: Vec<_> = info.split("\r\n").collect();
-    let first: Vec<_> = lines[0].split(" ").collect();
-    first[0] == "CONNECT"
-}
+use tokio::io::AsyncReadExt;
+use tokio::net::{TcpListener, TcpStream};
 
-fn parse_target_server(info: &String) -> String {
-    for line in info.split("\r\n") {
-        let arr: Vec<_> = line.split(": ").collect();
-        if arr[0] == "Host" {
-            let port = if arr[1].contains(":") { "" } else { ":80" };
-            return arr[1].to_string() + port;
-        }
-    }
-    return String::new();
-}
-
-fn handle_connection(mut client: TcpStream, addr: Arc<&str>) {
+async fn handle_client(mut client: TcpStream) -> Result<(), Box<dyn Error>> {
     let mut buf = [0; 8192];
-    let size = client.read(&mut buf).unwrap();
-    let str = String::from_utf8_lossy(&buf).to_string();
-    let mut server;
+    let size = client.read(&mut buf).await?;
+    let messsage = &buf[..size];
 
-    let target = parse_target_server(&str);
+    debug!("receive first buffer, size: {size}, {:?}", &buf[..size]);
 
-    debug!("target server: {target}, size: {size}, {:?}", &buf[..size]);
-
-    if target.is_empty() {
-        // 解析目标服务器出错，尝试作为socks代理处理
-        socks::handle(&buf[..size], client, addr);
-        return;
-    }
-
-    if is_connect(&str) {
-        server = TcpStream::connect(target).unwrap();
-
-        // 连接目标成功之后，返回下面内容，表示 通知浏览器连接成功
-        client
-            .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-            .unwrap();
+    if is_socks5_proxy(messsage) {
+        debug!("use as socks5 proxy");
+        socks::handle(messsage, client).await;
+        return Ok(());
     } else {
-        server = TcpStream::connect(target).unwrap();
-        server.write(&buf[..size]).unwrap();
+        debug!("use as http proxy");
+        http::handle(messsage, client).await;
     }
-
-    //  经过实践，此处无法使用Arc引用计数来跨线程, TcpStream::read会卡住
-    let mut send_server = server.try_clone().unwrap();
-    let mut recv_client = client.try_clone().unwrap();
-    thread::spawn(move || {
-        // 把服务器的请求转发给客户端
-        utils::pipe(&mut send_server, &mut recv_client);
-    });
-    // 把客户端的请求转发给服务器
-    utils::pipe(&mut client, &mut server);
+    return Ok(());
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // 注意，env_logger 必须尽可能早的初始化
     env_logger::init();
-    let addr = Arc::new("127.0.0.1:7878");
-    let server = TcpListener::bind(addr.as_ref()).expect("launch server failed");
-    let pool: ThreadPool = ThreadPool::with_capacity(4);
-    for connection in server.incoming() {
-        if let Ok(connection) = connection {
-            debug!(
-                "new connection received: {}",
-                connection.peer_addr().unwrap()
-            );
+    let config = Config::global();
+    debug!("launch arguments: {:?}, config: {:?}", env::args(), config);
+    let addr = format!("{}:{}", config.host, config.port);
+    let server = TcpListener::bind(&addr)
+        .await
+        .expect("launch proxy server failed");
 
-            let addr = Arc::clone(&addr);
-            pool.run(|| {
-                handle_connection(connection, addr);
-            });
-        }
+    println!("proxy server is running at: {addr}");
+    println!("proxy address:");
+    println!("\t\thttp://{addr}");
+
+    let mut socks5_info = String::from("socks5://");
+    if let (Some(username), Some(password)) =
+        (config.username.as_deref(), config.password.as_deref())
+    {
+        socks5_info.push_str(&format!("{username}:{password}@"));
     }
+    socks5_info.push_str(&addr);
+    println!("\t\t{socks5_info}");
 
-    debug!("shutdown server");
+    loop {
+        let (client, _) = server.accept().await.unwrap();
+        debug!("new client connected");
+        tokio::spawn(async move {
+            handle_client(client).await.unwrap();
+        });
+    }
 }

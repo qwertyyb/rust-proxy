@@ -1,6 +1,7 @@
-use std::net::UdpSocket;
+use std::sync::Arc;
 
 use log::debug;
+use tokio::net::UdpSocket;
 
 use super::constant::ATYP;
 
@@ -40,10 +41,10 @@ pub fn parse_target(atyp: ATYP, message: &[u8]) -> (String, usize) {
     return (format!("{addr}:{port}"), port_pos + 2);
 }
 
-pub fn pipe_udp_to_server(current: &UdpSocket, next: &UdpSocket) {
+pub async fn pipe_udp_to_server(current: Arc<UdpSocket>, next: Arc<UdpSocket>) {
     loop {
         let mut buf = [0; 10240];
-        match current.recv(&mut buf) {
+        match current.recv(&mut buf).await {
             Ok(size) => {
                 let atyp = ATYP::from(buf[3]);
                 let (target, next_pos) = parse_target(atyp, &buf[4..size]);
@@ -54,6 +55,7 @@ pub fn pipe_udp_to_server(current: &UdpSocket, next: &UdpSocket) {
                 );
 
                 next.send_to(&buf[next_pos..size], target)
+                    .await
                     .expect("send udp failed");
             }
             Err(err) => {
@@ -64,10 +66,10 @@ pub fn pipe_udp_to_server(current: &UdpSocket, next: &UdpSocket) {
     }
 }
 
-pub fn pipe_udp_to_client(current: &UdpSocket, next: &UdpSocket) {
+pub async fn pipe_udp_to_client(current: Arc<UdpSocket>, next: Arc<UdpSocket>) {
     loop {
         let mut buf = [0; 10240];
-        match current.recv(&mut buf) {
+        match current.recv(&mut buf).await {
             Ok(size) => {
                 debug!("[to client] receive: {size}, {:?}", &buf[..size]);
                 let mut data = vec![
@@ -83,7 +85,7 @@ pub fn pipe_udp_to_client(current: &UdpSocket, next: &UdpSocket) {
                     (7878 as u16).to_be_bytes()[1],
                 ];
                 data.extend_from_slice(&buf[..size]);
-                next.send(&data).expect("send failed");
+                next.send(&data).await.expect("send failed");
             }
             Err(err) => {
                 debug!("udp error: {err}");

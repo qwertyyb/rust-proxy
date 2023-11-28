@@ -46,13 +46,13 @@ pub enum REP {
     Succeeded = 0x00, // succeeded
     Failure = 0x01,   // general SOCKS server failure
     // NotAllowed = 0x02, // connection not allowed by ruleset
-    NetworkUnreachable = 0x03,  // Network unreachable
-    HostUnreachable = 0x04,     // Host unreachable
-    ConnectionRefused = 0x05,   // Connection refused
-    TTLExpired = 0x06,          // TTL expired
-    CommandNotSupported = 0x07, // Command not supported
+    NetworkUnreachable = 0x03, // Network unreachable
+    HostUnreachable = 0x04,    // Host unreachable
+    ConnectionRefused = 0x05,  // Connection refused
+    TTLExpired = 0x06,         // TTL expired
+    // CommandNotSupported = 0x07, // Command not supported
     AddressTypeNotSupported = 0x08, // Address type not supported
-                                // Unknown = 0x09, // to X'FF' unassigned
+                                    // Unknown = 0x09, // to X'FF' unassigned
 }
 
 impl From<ErrorKind> for REP {
@@ -86,8 +86,8 @@ impl From<u8> for ATYP {
         }
     }
 }
-impl From<&SocketAddr> for ATYP {
-    fn from(value: &SocketAddr) -> Self {
+impl From<SocketAddr> for ATYP {
+    fn from(value: SocketAddr) -> Self {
         if value.is_ipv6() {
             Self::IPv6
         } else {

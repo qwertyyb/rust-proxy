@@ -2,10 +2,11 @@ use log::debug;
 use rand::{thread_rng, Rng};
 use std::{
     collections::HashMap,
-    io::{prelude::*, ErrorKind},
-    net::{TcpStream, UdpSocket},
-    sync::{Mutex, OnceLock},
-    thread,
+    sync::{Arc, Mutex, OnceLock},
+};
+use tokio::{
+    net::UdpSocket,
+    task::{self, JoinHandle},
 };
 
 use crate::socks::{constant::ATYP, utils};
@@ -43,32 +44,38 @@ impl Nat {
 }
 
 pub struct UdpTunnel {
-    pub local_socket: UdpSocket,
-    pub remote_socket: UdpSocket,
+    pub local_socket: Arc<UdpSocket>,
+    pub remote_socket: Arc<UdpSocket>,
+    client_to_server: Option<JoinHandle<()>>,
+    server_to_client: Option<JoinHandle<()>>,
 }
 
 impl UdpTunnel {
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         Self {
-            local_socket: Self::create_socket(),
-            remote_socket: Self::create_socket(),
+            local_socket: Arc::new(Self::create_socket().await),
+            remote_socket: Arc::new(Self::create_socket().await),
+            client_to_server: None,
+            server_to_client: None,
         }
     }
 
-    pub fn create_socket() -> UdpSocket {
+    async fn create_socket() -> UdpSocket {
         let port = Nat::global().lock().unwrap().select_port().unwrap();
-        // 1.1 使用UdpSocket::bind方法创建本地udp_socket
-        let socket = UdpSocket::bind(format!("0.0.0.0:{port}")).unwrap();
+        let socket = UdpSocket::bind(format!("0.0.0.0:{port}")).await.unwrap();
         return socket;
     }
-    pub fn start(&self) {
+
+    pub async fn start(&mut self) {
         let nat = Nat::global();
-        // 如果客户端传入了客户端将要使用的
+
         let mut buf = [0; 10240];
-        let (size, client_addr) = self.local_socket.recv_from(&mut buf).expect("错误");
-        debug!("size: {size}");
+        let (size, client_addr) = self.local_socket.recv_from(&mut buf).await.expect("错误");
+        debug!("receive, size: {size}, addr: {:?}", client_addr);
+
         self.local_socket
             .connect(client_addr)
+            .await
             .expect("connect udp local client failed");
 
         let atyp = ATYP::from(buf[3]);
@@ -77,30 +84,50 @@ impl UdpTunnel {
 
         self.remote_socket
             .connect(target)
+            .await
             .expect("connect udp remote server failed");
 
         // 监听数据开始交换
 
-        let client = self.local_socket.try_clone().unwrap();
-        let server = self.remote_socket.try_clone().unwrap();
-        thread::spawn(move || {
-            utils::pipe_udp_to_server(&client, &server);
-        });
+        let remote_client = Arc::clone(&self.local_socket);
+        let remote_server = Arc::clone(&self.remote_socket);
+        self.server_to_client = Some(task::spawn(async {
+            debug!("pipe to server");
+            utils::pipe_udp_to_client(remote_server, remote_client).await;
+        }));
 
-        let client = self.local_socket.try_clone().unwrap();
-        let server = self.remote_socket.try_clone().unwrap();
-        thread::spawn(move || {
-            utils::pipe_udp_to_client(&server, &client);
-        });
+        let local_client = Arc::clone(&self.local_socket);
+        let local_server = Arc::clone(&self.remote_socket);
+        self.client_to_server = Some(task::spawn(async {
+            utils::pipe_udp_to_server(local_client, local_server).await;
+        }));
 
         self.remote_socket
             .send(&buf[next_pos..size])
+            .await
             .expect("send udp data to server failed");
 
         // 3. 添加到 hashmap 映射一下
         nat.lock().unwrap().insert(
             self.local_socket.local_addr().unwrap().port(),
             self.remote_socket.local_addr().unwrap().port(),
+        );
+    }
+}
+
+impl Drop for UdpTunnel {
+    fn drop(&mut self) {
+        if let Some(join) = self.client_to_server.take() {
+            join.abort();
+        }
+        if let Some(join) = self.server_to_client.take() {
+            join.abort();
+        }
+
+        println!(
+            "local port count: {}, remote port count: {}",
+            Arc::strong_count(&self.local_socket),
+            Arc::strong_count(&self.local_socket)
         );
     }
 }

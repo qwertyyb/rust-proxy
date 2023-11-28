@@ -43,14 +43,3 @@ brook --log console dnsserver --listen 127.0.0.1:5354 --dns "192.168.31.1:53"
 brook testsocks5 --socks5 127.0.0.1:7878 --domain "baidu.com" --dns "127.0.0.1:5354" -a 39.156.66.10
 
 ```
-
-## 已知问题
-
-1. UDP 穿透时新增的线程I/O阻塞无法停止
-
-表现为每有一个新的 UDP 流量过来时，会启动两个交换数据的线程（client -> socks5 -> server，server -> socks5 -> client），这两个线程不会停止。
-
-这个主要是因为两个线程都被I/O阻塞了（UdpSocket::read），而rust官方目前没有提供一种官方的方式来异步交换数据，也没有提供一种方法来终止掉一个线程。
-
-
-
