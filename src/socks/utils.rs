@@ -1,6 +1,5 @@
 use std::net::UdpSocket;
 
-use futures::io::BufReader;
 use log::debug;
 
 use super::constant::ATYP;
