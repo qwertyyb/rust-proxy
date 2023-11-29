@@ -10,7 +10,7 @@ use tokio::net::TcpStream;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::socks::auth::Auth;
+use crate::connection::Connection;
 use crate::Config;
 use crate::{
     socks::constant::{ATYP, REP},
@@ -20,6 +20,11 @@ use crate::{
 use self::{constant::CMD, tunnel::UdpTunnel};
 
 pub fn is_socks5_proxy(message: &[u8]) -> bool {
+    //     +----+----------+----------+
+    //     |VER | NMETHODS | METHODS  |
+    //     +----+----------+----------+
+    //     | 1  |    1     | 1 to 255 |
+    //     +----+----------+----------+
     let [ver, nmethods, ..] = *message else {
         return false;
     };
@@ -100,18 +105,20 @@ async fn handle_udp(mut client: TcpStream) {
     }
 }
 
-pub async fn handle(mut client: TcpStream) {
+pub async fn handle(connection: Connection) {
     //     +----+----------+----------+
     //     |VER | NMETHODS | METHODS  |
     //     +----+----------+----------+
     //     | 1  |    1     | 1 to 255 |
     //     +----+----------+----------+
+    let Connection { mut client, config } = connection;
 
     let mut buf = [0; 257];
     let size = client.read(&mut buf).await.unwrap();
     let message = &buf[..size];
     info!("receive first from client, size: {size}, message: {message:?}");
-    let success = Auth::global().handle(message, &mut client).await.unwrap();
+
+    let success = auth::handle(&config, message, &mut client).await.unwrap();
     if !success {
         return;
     }

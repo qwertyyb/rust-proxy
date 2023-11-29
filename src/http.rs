@@ -4,7 +4,7 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::utils;
+use crate::{connection::Connection, utils};
 
 fn parse_target_server(info: &String) -> String {
     for line in info.split("\r\n") {
@@ -23,7 +23,8 @@ fn is_tcp(info: &String) -> bool {
     first[0] == "CONNECT"
 }
 
-pub async fn handle(mut client: TcpStream) {
+pub async fn handle(connection: Connection) {
+    let mut client = connection.client;
     let mut buf = [0; 10240];
     let size = client.read(&mut buf).await.unwrap();
     let message = &buf[..size];

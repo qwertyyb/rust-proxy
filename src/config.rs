@@ -1,8 +1,4 @@
-use std::sync::OnceLock;
-
 use clap::Parser;
-
-static CONFIG: OnceLock<Config> = OnceLock::new();
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -23,10 +19,6 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn global() -> &'static Self {
-        CONFIG.get_or_init(|| Self::parse())
-    }
-
     pub fn has_auth(&self) -> bool {
         return self.username.is_some() && self.password.is_some();
     }
