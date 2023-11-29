@@ -19,32 +19,6 @@ use crate::{
 
 use self::{constant::CMD, tunnel::UdpTunnel};
 
-pub fn is_socks5_proxy(message: &[u8]) -> bool {
-    //     +----+----------+----------+
-    //     |VER | NMETHODS | METHODS  |
-    //     +----+----------+----------+
-    //     | 1  |    1     | 1 to 255 |
-    //     +----+----------+----------+
-    let [ver, nmethods, ..] = *message else {
-        return false;
-    };
-    if ver == 5 && message.len() == (nmethods as usize) + 2 {
-        return true;
-    }
-    return false;
-}
-
-pub fn format_socks5_info(config: &Config) -> String {
-    let mut socks5_info = String::from("socks5://");
-    if let (Some(username), Some(password)) =
-        (config.username.as_deref(), config.password.as_deref())
-    {
-        socks5_info.push_str(&format!("{username}:{password}@"));
-    }
-    socks5_info.push_str(&format!("{}:{}", config.host, config.port));
-    socks5_info
-}
-
 fn parse_cmd(message: &[u8]) -> CMD {
     CMD::from(message[1])
 }
@@ -105,6 +79,35 @@ async fn handle_udp(mut client: TcpStream) {
     }
 }
 
+/// 根据 `Config` 输出代理 socks5 代理地址
+pub fn format_socks5_info(config: &Config) -> String {
+    let mut socks5_info = String::from("socks5://");
+    if let (Some(username), Some(password)) =
+        (config.username.as_deref(), config.password.as_deref())
+    {
+        socks5_info.push_str(&format!("{username}:{password}@"));
+    }
+    socks5_info.push_str(&format!("{}:{}", config.host, config.port));
+    socks5_info
+}
+
+/// 根据前几个字节，判断是否是 socks5 代理协议
+pub fn is_socks5_proxy(message: &[u8]) -> bool {
+    //     +----+----------+----------+
+    //     |VER | NMETHODS | METHODS  |
+    //     +----+----------+----------+
+    //     | 1  |    1     | 1 to 255 |
+    //     +----+----------+----------+
+    let [ver, nmethods, ..] = *message else {
+        return false;
+    };
+    if ver == 5 && message.len() == (nmethods as usize) + 2 {
+        return true;
+    }
+    return false;
+}
+
+/// socks5 流量代理方法，每个代理进入时会走到此方法
 pub async fn handle(connection: Connection) {
     //     +----+----------+----------+
     //     |VER | NMETHODS | METHODS  |

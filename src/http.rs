@@ -23,6 +23,7 @@ fn is_tcp(info: &String) -> bool {
     first[0] == "CONNECT"
 }
 
+/// http 流量代理方法，每个代理连接进来时会走到此方法
 pub async fn handle(connection: Connection) {
     let mut client = connection.client;
     let mut buf = [0; 10240];

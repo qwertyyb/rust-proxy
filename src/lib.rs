@@ -1,19 +1,58 @@
+//! 一个支持 http 和 socks5 代理的代理服务器
+//!
+//! 注意: 这里的 http 代理服务器也是支持代理 HTTPS 流量的
+//!
+//! 使用方式:
+//!
+//! 1. 命令行
+//! ```bash
+//! cargo run -- --port=7878 --username=hello --password=world
+//! ```
+//! 不加 username 和 password 参数即可启用无鉴权 socks5 代理服务器
+//!
+//! 2. 库的方式
+//! ```rust
+//!
+//! use crate::rust_proxy::ProxyServer;
+//!
+//! ...
+//! ProxyServer::run(Config {
+//!     port: 7878,
+//!     host: "0.0.0.0".to_string(),
+//!     username: Some("hello".to_string()),
+//!     password: Some("world".to_string()),
+//! })
+//! .await;
+//! ...
+//! ```
+
+/// http 代理模块
 pub mod http;
+
+/// socks5 代理模块
 pub mod socks;
+
+/// 每个客户端连接结构体
+pub mod connection;
+
+/// 工具方法模块
 pub mod utils;
 
 mod config;
-mod connection;
 
 use std::sync::Arc;
 
 use clap::Parser;
+
+/// 代理服务器配置
 pub use config::Config;
+
 use log::debug;
 use tokio::net::TcpListener;
 
 use crate::connection::Connection;
 
+/// 代理服务器启动入口
 pub struct ProxyServer;
 
 impl ProxyServer {
@@ -33,7 +72,7 @@ impl ProxyServer {
             http::handle(connection).await;
         }
     }
-    async fn run(config: Config) {
+    pub async fn run(config: Config) {
         let config = Arc::new(config);
         let addr = format!("{}:{}", config.host, config.port);
         let server = TcpListener::bind(&addr)
@@ -60,6 +99,7 @@ impl ProxyServer {
     }
 }
 
+/// 自动解析命令行参数并启动代理服务器
 pub async fn launch_from_cli() {
     let config = Config::parse();
     ProxyServer::run(config).await;
