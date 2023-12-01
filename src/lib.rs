@@ -35,9 +35,6 @@ pub mod socks;
 /// 每个客户端连接结构体
 pub mod connection;
 
-/// 工具方法模块
-pub mod utils;
-
 mod config;
 
 use std::sync::Arc;

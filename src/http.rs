@@ -4,7 +4,7 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::{connection::Connection, utils};
+use crate::connection::Connection;
 
 fn parse_target_server(info: &String) -> String {
     for line in info.split("\r\n") {
@@ -14,7 +14,7 @@ fn parse_target_server(info: &String) -> String {
             return arr[1].to_string() + port;
         }
     }
-    return String::new();
+    String::new()
 }
 
 fn is_tcp(info: &String) -> bool {
@@ -48,5 +48,7 @@ pub async fn handle(connection: Connection) {
         server.write(&message).await.unwrap();
     }
 
-    utils::exchange(client, server).await;
+    tokio::io::copy_bidirectional(&mut client, &mut server)
+        .await
+        .unwrap();
 }

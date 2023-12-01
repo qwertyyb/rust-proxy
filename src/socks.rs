@@ -11,11 +11,8 @@ use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::connection::Connection;
+use crate::socks::constant::{ATYP, REP};
 use crate::Config;
-use crate::{
-    socks::constant::{ATYP, REP},
-    utils as root_utils,
-};
 
 use self::{constant::CMD, tunnel::UdpTunnel};
 
@@ -38,11 +35,13 @@ async fn handle_connect(mut client: TcpStream, target: &String) {
 
     let server = TcpStream::connect(target).await;
     match server {
-        Ok(server) => {
+        Ok(mut server) => {
             // 回复客户端连接已建立
             client.write_all(&data).await.unwrap();
 
-            root_utils::exchange(client, server).await;
+            tokio::io::copy_bidirectional(&mut client, &mut server)
+                .await
+                .unwrap();
         }
         Err(error) => {
             data[1] = REP::from(error.kind()) as u8;
@@ -102,9 +101,10 @@ pub fn is_socks5_proxy(message: &[u8]) -> bool {
         return false;
     };
     if ver == 5 && message.len() == (nmethods as usize) + 2 {
-        return true;
+        true
+    } else {
+        false
     }
-    return false;
 }
 
 /// socks5 流量代理方法，每个代理进入时会走到此方法
@@ -148,6 +148,4 @@ pub async fn handle(connection: Connection) {
             debug!("unkown cmd");
         }
     }
-
-    return;
 }

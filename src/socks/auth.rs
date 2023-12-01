@@ -47,8 +47,9 @@ async fn handle_user_pwd(config: &Arc<Config>, client: &mut TcpStream) -> Result
     warn!("auth failed");
     client.write_all(&[0x01, 0x01]).await.unwrap();
     client.shutdown().await.unwrap();
-    return Ok(false);
+    Ok(false)
 }
+
 pub async fn handle(
     config: &Arc<Config>,
     message: &[u8],
@@ -81,18 +82,18 @@ pub async fn handle(
                 .write_all(&[0x05, Method::UserPwd as u8])
                 .await
                 .unwrap();
-            return handle_user_pwd(config, client).await;
+            handle_user_pwd(config, client).await
         } else {
             client.write_all(&[0x05, 0xff]).await.unwrap();
-            return Ok(false);
+            Ok(false)
         }
     } else if !config.has_auth() && methods.any(|value| value == Method::None) {
         info!("proxy server dont need username/password auth");
         async { client.write_all(&[0x05, Method::None as u8]).await }
             .await
             .unwrap();
-        return Ok(true);
+        Ok(true)
     } else {
-        return Err("unsupport client".to_string());
+        Err("unsupport client".to_string())
     }
 }

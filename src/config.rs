@@ -23,6 +23,6 @@ pub struct Config {
 impl Config {
     /// 判断此配置是否启用了鉴权
     pub fn has_auth(&self) -> bool {
-        return self.username.is_some() && self.password.is_some();
+        self.username.is_some() && self.password.is_some()
     }
 }
