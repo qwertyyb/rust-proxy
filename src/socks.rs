@@ -129,7 +129,7 @@ pub async fn handle(connection: Connection) {
     let mut buf = [0; 1024];
     let size = client.read(&mut buf).await.unwrap();
 
-    let (target, _) = utils::parse_target(ATYP::from(buf[3]), &buf[4..size]);
+    let (target, _) = utils::parse_target(&ATYP::from(buf[3]), &buf[4..size]);
     let cmd = parse_cmd(&buf[..size]);
 
     debug!(

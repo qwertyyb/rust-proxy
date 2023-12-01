@@ -1,14 +1,17 @@
-use std::sync::Arc;
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
 use log::debug;
 use tokio::net::UdpSocket;
 
 use super::constant::ATYP;
 
-pub fn parse_target(atyp: ATYP, message: &[u8]) -> (String, usize) {
+pub fn parse_target(atyp: &ATYP, message: &[u8]) -> (String, usize) {
     let addr;
     let port_pos;
-    match ATYP::from(atyp) {
+    match atyp {
         ATYP::DOMAINNAME => {
             // ATYP为域名时，第一个字节表示后面域名的长度
             let len = message[0] as usize;
@@ -38,7 +41,36 @@ pub fn parse_target(atyp: ATYP, message: &[u8]) -> (String, usize) {
         }
     };
     let port = u16::from_be_bytes([message[port_pos], message[port_pos + 1]]);
-    return (format!("{addr}:{port}"), port_pos + 2);
+    (format!("{addr}:{port}"), port_pos + 2)
+}
+
+pub fn stringify_target(addr: SocketAddr) -> Vec<u8> {
+    let mut data = vec![];
+    match addr.ip() {
+        IpAddr::V4(addr) => {
+            data.push(ATYP::IPv4 as u8);
+            data.extend(&addr.octets());
+        }
+        IpAddr::V6(addr) => {
+            data.push(ATYP::IPv4 as u8);
+            data.extend(&addr.octets());
+        }
+    }
+    data.extend(addr.port().to_be_bytes());
+    data
+}
+
+pub fn parse_udp_frame(frame: &[u8]) -> (ATYP, String, &[u8]) {
+    let atyp = ATYP::from(frame[3]);
+    let (target, next_pos) = parse_target(&atyp, &frame[4..]);
+    (atyp, target, &frame[4 + next_pos..])
+}
+
+pub fn stringify_udp_frame(data: &[u8], remote_addr: SocketAddr) -> Vec<u8> {
+    let mut frame: Vec<u8> = vec![0x00, 0x00, 0x00];
+    frame.extend(stringify_target(remote_addr));
+    frame.extend_from_slice(data);
+    frame
 }
 
 pub async fn pipe_udp_to_server(current: Arc<UdpSocket>, next: Arc<UdpSocket>) {
@@ -46,17 +78,14 @@ pub async fn pipe_udp_to_server(current: Arc<UdpSocket>, next: Arc<UdpSocket>) {
         let mut buf = [0; 10240];
         match current.recv(&mut buf).await {
             Ok(size) => {
-                let atyp = ATYP::from(buf[3]);
-                let (target, next_pos) = parse_target(atyp, &buf[4..size]);
+                let (_, target, data) = parse_udp_frame(&buf[..size]);
 
                 debug!(
                     "[to server] target: {target}, size: {size}, data: {:?},",
-                    &buf[..size]
+                    data
                 );
 
-                next.send_to(&buf[next_pos..size], target)
-                    .await
-                    .expect("send udp failed");
+                next.send_to(data, target).await.expect("send udp failed");
             }
             Err(err) => {
                 debug!("udp error: {err}");
@@ -71,20 +100,12 @@ pub async fn pipe_udp_to_client(current: Arc<UdpSocket>, next: Arc<UdpSocket>) {
         let mut buf = [0; 10240];
         match current.recv(&mut buf).await {
             Ok(size) => {
-                debug!("[to client] receive: {size}, {:?}", &buf[..size]);
-                let mut data = vec![
-                    0x00,
-                    0x00,
-                    0x00,
-                    ATYP::IPv4 as u8,
-                    127,
-                    0,
-                    0,
-                    1,
-                    (7878 as u16).to_be_bytes()[0],
-                    (7878 as u16).to_be_bytes()[1],
-                ];
-                data.extend_from_slice(&buf[..size]);
+                let data = stringify_udp_frame(&buf[..size], next.local_addr().unwrap());
+                debug!(
+                    "[to client] target: {}, size: {}",
+                    next.local_addr().unwrap(),
+                    data.len()
+                );
                 next.send(&data).await.expect("send failed");
             }
             Err(err) => {
