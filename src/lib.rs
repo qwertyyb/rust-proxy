@@ -10,21 +10,6 @@
 //! ```
 //! 不加 username 和 password 参数即可启用无鉴权 socks5 代理服务器
 //!
-//! 2. 库的方式
-//! ```rust
-//!
-//! use crate::rust_proxy::ProxyServer;
-//!
-//! ...
-//! ProxyServer::run(Config {
-//!     port: 7878,
-//!     host: "0.0.0.0".to_string(),
-//!     username: Some("hello".to_string()),
-//!     password: Some("world".to_string()),
-//! })
-//! .await;
-//! ...
-//! ```
 
 /// http 代理模块
 pub mod http;
@@ -36,6 +21,7 @@ pub mod socks;
 pub mod connection;
 
 mod config;
+mod dns;
 
 use std::sync::Arc;
 
