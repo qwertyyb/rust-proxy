@@ -21,7 +21,6 @@ pub mod socks;
 pub mod connection;
 
 mod config;
-mod dns;
 
 use std::sync::Arc;
 
@@ -30,10 +29,13 @@ use clap::Parser;
 /// 代理服务器配置
 pub use config::Config;
 
+use dns::Frame;
 use log::debug;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, UdpSocket};
 
 use crate::connection::Connection;
+
+mod dns;
 
 /// 代理服务器启动入口
 pub struct ProxyServer;
@@ -82,8 +84,28 @@ impl ProxyServer {
     }
 }
 
+pub struct DnsServer;
+
+impl DnsServer {
+    async fn run() {
+        let server = UdpSocket::bind("127.0.0.1:7878").await.unwrap();
+        debug!("run dns server");
+
+        let mut buf = [0; 1024];
+        let (size, from) = server.recv_from(&mut buf).await.unwrap();
+        debug!("receive buf: {size}, {:?}", &buf[..size]);
+
+        let data = dns::handle(&buf[..size]);
+
+        debug!("reply: {data:?}");
+        server.send_to(&data, from).await.unwrap();
+    }
+}
+
 /// 自动解析命令行参数并启动代理服务器
 pub async fn launch_from_cli() {
-    let config = Config::parse();
-    ProxyServer::run(config).await;
+    DnsServer::run().await;
+
+    // let config = Config::parse();
+    // ProxyServer::run(config).await;
 }

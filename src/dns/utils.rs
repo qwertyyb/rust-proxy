@@ -1,15 +1,21 @@
-fn get_bit(data: u16, pos: usize) -> bool {
+pub fn get_bit(data: u16, pos: usize) -> bool {
     ((data & (1 << pos)) >> pos) == 1
 }
-fn get_value(data: u16, pos: usize, len: usize) -> u16 {
-    data << (16 - pos - len) >> (15 - pos)
+pub fn get_value(data: u16, pos: usize, len: usize) -> u16 {
+    (data << (16 - pos - len)) >> (16 - len)
 }
-fn set_bit(data: u16, pos: usize, value: bool) -> u16 {
+pub fn set_bit(data: u16, pos: usize, value: bool) -> u16 {
     if value {
         data | (1 << pos)
     } else {
         data & !(1 << pos)
     }
+}
+pub fn set_value(data: u16, pos: usize, len: usize, value: u16) -> u16 {
+    let mask: u16 = ((1 << len) - 1) << pos;
+    let cleared_bits = data & !mask;
+    let shifted_value = value << pos;
+    cleared_bits | shifted_value
 }
 
 #[cfg(test)]
@@ -35,7 +41,7 @@ mod test {
             (0xf2, 0, 1, 0),
             (0xf2, 1, 2, 1),
             (0xf2, 1, 3, 1),
-            (0xf2, 1, 4, 0x1001),
+            (0xf2, 1, 4, 9),
         ];
         for (data, pos, len, result) in cases {
             assert_eq!(
@@ -59,6 +65,22 @@ mod test {
                 set_bit(data, pos, value),
                 result,
                 "set_bit({data:02X}, {pos}, {value}) != {result}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_set_value() {
+        let cases: [(u16, usize, usize, u16, u16); 3] = [
+            (0b01010101, 1, 1, 0b1, 0b01010111),
+            (0b01010101, 1, 2, 0b1, 0b01010011),
+            (0b01010101, 2, 3, 0b10, 0b01001001),
+        ];
+        for (data, pos, len, value, result) in cases {
+            assert_eq!(
+                set_value(data, pos, len, value),
+                result,
+                "set_bit({data:08b}, {pos}, {len}, {value:08b}) != {result:08b}"
             );
         }
     }
