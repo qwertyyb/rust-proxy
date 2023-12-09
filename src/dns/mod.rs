@@ -1,10 +1,39 @@
-use std::{collections::HashMap, net::Ipv4Addr, str::FromStr};
-
 use log::debug;
 
+pub use self::resolver::resolve;
 use self::utils::*;
 
+mod hosts;
+mod resolver;
 mod utils;
+
+#[derive(Eq, PartialEq, Hash, Clone, Copy, Debug)]
+pub enum RecordType {
+    A = 1,     // IPv4
+    AAAA = 28, // IPv6
+    NS = 2,
+    CNAME = 5,
+    TXT = 16,
+}
+impl RecordType {
+    fn to_be_bytes(&self) -> [u8; 2] {
+        (*self as u16).to_be_bytes()
+    }
+}
+
+impl TryFrom<&u16> for RecordType {
+    type Error = String;
+    fn try_from(value: &u16) -> Result<Self, String> {
+        match value {
+            1 => Ok(Self::A),
+            2 => Ok(Self::NS),
+            5 => Ok(Self::CNAME),
+            16 => Ok(Self::TXT),
+            28 => Ok(Self::AAAA),
+            _ => Err("unsupported record type".to_string()),
+        }
+    }
+}
 
 #[derive(Debug)]
 struct Flags {
@@ -100,9 +129,9 @@ impl Header {
 
 #[derive(Debug)]
 struct Question {
-    name: Vec<u8>, // 待查询的域名
-    r#type: u16,   // 查询类型，1表示A记录，28表示AAAA IPv6，等等
-    class: u16,    // 通常为 1 ，表示 TCP/IP 互联网地址；
+    name: Vec<u8>,      // 待查询的域名
+    r#type: RecordType, // 查询类型，1表示A记录，28表示AAAA IPv6，等等
+    class: u16,         // 通常为 1 ，表示 TCP/IP 互联网地址；
 }
 
 impl Question {
@@ -122,7 +151,15 @@ impl Question {
     fn get_name_len(data: &[u8]) -> usize {
         let mut index = 0;
         while data[index] > 0 {
-            index += data[index] as usize + 1;
+            let is_pointer = get_bit(data[index] as u16, 6) && get_bit(data[index] as u16, 7);
+            if is_pointer {
+                // 前两位是1，则后6位是offset
+                index = index + 1
+            } else {
+                index += data[index] as usize + 1;
+            }
+            // index += data[index] as usize + 1;
+            debug!("data: {data:?}, {index}");
             if data[index] == 0 {
                 return index + 1;
             }
@@ -134,7 +171,8 @@ impl Question {
         debug!("name len: {name_len}, {data:?}");
         let question = Self {
             name: data[..name_len].to_vec(),
-            r#type: u16::from_be_bytes([data[name_len], data[name_len + 1]]),
+            r#type: RecordType::try_from(&u16::from_be_bytes([data[name_len], data[name_len + 1]]))
+                .unwrap(),
             class: u16::from_be_bytes([data[name_len + 2], data[name_len + 3]]),
         };
         (question, name_len + 4)
@@ -170,9 +208,9 @@ impl Clone for Question {
 
 #[derive(Debug)]
 struct Answer {
-    name: Vec<u8>, // 待查询的域名
-    r#type: u16,   // 查询类型，1表示A记录，28表示AAAA IPv6，等等
-    class: u16,    // 通常为 1 ，表示 TCP/IP 互联网地址；
+    name: Vec<u8>,      // 待查询的域名
+    r#type: RecordType, // 查询类型，1表示A记录，28表示AAAA IPv6，等等
+    class: u16,         // 通常为 1 ，表示 TCP/IP 互联网地址；
     ttl: u32,
     resource_data_length: u16,
     resource_data: Vec<u8>,
@@ -206,7 +244,7 @@ impl Answer {
     fn build(question: &Question, ttl: u32, value: &[u8]) -> Self {
         Self {
             name: question.name.clone(),
-            r#type: question.r#type,
+            r#type: question.r#type.clone(),
             class: question.class,
             ttl,
             resource_data_length: value.len() as u16,
@@ -233,7 +271,8 @@ struct Authority;
 struct Additional;
 
 #[derive(Debug)]
-pub struct Frame {
+pub struct Frame<'a> {
+    origin: Option<&'a [u8]>,
     header: Header,
     question: Vec<Question>,
     answer: Vec<Answer>,
@@ -241,13 +280,14 @@ pub struct Frame {
     additional: Option<Additional>,
 }
 
-impl Frame {
-    pub fn parse(data: &[u8]) -> Self {
+impl<'a> Frame<'a> {
+    pub fn parse(data: &'a [u8]) -> Self {
         let header = Header::parse(&data[..12]);
         let (questions, len) = Question::parse_many(header.question_count, &data[12..]);
         let (answers, len) = Answer::parse_many(header.answer_count, &data[12 + len..]);
         Self {
-            header: header,
+            origin: Some(data),
+            header,
             question: questions,
             answer: answers,
             authority: None,
@@ -256,6 +296,7 @@ impl Frame {
     }
     fn create_reply(&self, answers: Vec<Answer>) -> Self {
         Self {
+            origin: None,
             header: self.header.reply(answers.len() as u16),
             question: self.question.clone(),
             answer: answers,
@@ -280,46 +321,4 @@ impl Frame {
         data.extend(answer);
         data
     }
-}
-
-fn transform_domain(domain: &str) -> Vec<u8> {
-    domain
-        .split(".")
-        .map(|part| {
-            let mut data = part.as_bytes().to_vec();
-            data.insert(0, data.len() as u8);
-            data
-        })
-        .flatten()
-        .collect()
-}
-
-fn transform_ip(ip: &str) -> [u8; 4] {
-    Ipv4Addr::from_str(ip).unwrap().octets()
-}
-
-pub fn handle(data: &[u8]) -> Vec<u8> {
-    let mut origin_domains = HashMap::new();
-    origin_domains.insert("www.baidu.com.", "127.0.0.1");
-
-    let mut domains = HashMap::new();
-    for (domain, ip) in origin_domains {
-        domains.insert(transform_domain(domain), transform_ip(ip));
-    }
-
-    let frame = Frame::parse(data);
-    debug!("frame: {frame:?}");
-
-    let mut answers = Vec::new();
-    for question in &frame.question {
-        if let Some(value) = domains.get(&question.name) {
-            debug!("find record");
-            let answer = Answer::build(question, 10 * 60, value);
-            answers.push(answer);
-        }
-    }
-
-    // 生成应答报文
-    let reply_frame = frame.create_reply(answers);
-    reply_frame.stringify()
 }

@@ -18,6 +18,41 @@ pub fn set_value(data: u16, pos: usize, len: usize, value: u16) -> u16 {
     cleared_bits | shifted_value
 }
 
+pub fn transform_domain(domain: &str) -> Vec<u8> {
+    let mut result: Vec<u8> = domain
+        .split(".")
+        .map(|part| {
+            let mut data = part.as_bytes().to_vec();
+            data.insert(0, data.len() as u8);
+            data
+        })
+        .flatten()
+        .collect();
+    if let Some(value) = result.last() {
+        if *value != 0 {
+            result.push(0)
+        }
+    }
+    result
+}
+
+// pub fn transform_name(data: &[u8], offset: u16) {
+//     let mut index = offset;
+//     while data[index] > 0 {
+//         let is_pointer = get_bit(data[index] as u16, 6) && get_bit(data[index] as u16, 7);
+//         if is_pointer {
+//             // 前两位是1，则后6位是offset
+//             index = index + 1
+//         } else {
+//             index += data[index] as usize + 1;
+//         }
+//         if data[index] == 0 {
+//             return index + 1;
+//         }
+//     }
+//     return index;
+// }
+
 #[cfg(test)]
 mod test {
     use super::*;

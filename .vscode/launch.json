@@ -8,9 +8,12 @@
       "type": "lldb",
       "request": "launch",
       "name": "Debug",
-      "program": "${workspaceFolder}/<executable file>",
+      "program": "${workspaceFolder}/target/debug/rust-proxy",
       "args": [],
-      "cwd": "${workspaceFolder}"
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_LOG": "debug"
+      }
     }
   ]
 }
